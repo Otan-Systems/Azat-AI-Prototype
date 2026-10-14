@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azat AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1b4dd8;
+    --text-light: #5b7ce8;
+    --border: #cfd9f7;
+    --border-strong: #1b4dd8;
+    --bubble-user: #1b4dd8;
+    --bubble-user-text: #ffffff;
+    --bubble-ai: #eef2ff;
+    --bubble-ai-text: #1b4dd8;
+    --danger: #d83a3a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Montserrat', Arial, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .msg {
+    max-width: 78%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .msg.user {
+    align-self: flex-end;
+    background: var(--bubble-user);
+    color: var(--bubble-user-text);
+    border-bottom-right-radius: 4px;
+  }
+
+  .msg.ai {
+    align-self: flex-start;
+    background: var(--bubble-ai);
+    color: var(--bubble-ai-text);
+    border-bottom-left-radius: 4px;
+  }
+
+  .msg.system {
+    align-self: center;
+    background: none;
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .msg.loading {
+    align-self: flex-start;
+    color: var(--text-light);
+    font-size: 13px;
+    font-style: italic;
+  }
+
+  footer {
+    padding: 14px 20px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  #input {
+    flex: 1;
+    resize: none;
+    min-height: 44px;
+    max-height: 140px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-size: 14px;
+    color: var(--text);
+    outline: none;
+  }
+
+  #input:focus { border-color: var(--border-strong); }
+
+  #send {
+    padding: 12px 20px;
+    background: var(--bubble-user);
+    color: #ffffff;
+    border: none;
+    border-radius: 12px;
+    font-family: 'Montserrat', Arial, sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  #send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  #send:hover:not(:disabled) { opacity: 0.9; }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Azat AI</h1>
+</header>
+
+<div id="chat"></div>
+
+<footer>
+  <textarea id="input" placeholder="Напишите сообщение..." rows="1"></textarea>
+  <button id="send">Отправить</button>
+</footer>
+
+<script>
+  const MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+  const API_URL = "https://openrouter.ai/api/v1/chat/completions";
+  const API_KEY = "hidden";
+  const chatEl = document.getElementById('chat');
+  const inputEl = document.getElementById('input');
+  const sendBtn = document.getElementById('send');
+
+  let history = []; // {role: 'user'|'assistant', content: string}
+
+  function addMessage(role, text) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    div.textContent = text;
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    return div;
+  }
+
+  function autoResize() {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+  }
+  inputEl.addEventListener('input', autoResize);
+
+  async function sendMessage() {
+    const raw = inputEl.value.trim();
+    if (!raw) return;
+
+    const userText = applyRegexToOutgoing(raw);
+
+    addMessage('user', raw);
+    history.push({ role: 'user', content: userText });
+
+    inputEl.value = '';
+    autoResize();
+    sendBtn.disabled = true;
+
+    const loadingEl = addMessage('loading', 'Печатает...');
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + API_KEY
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: history
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error('HTTP ' + response.status + ': ' + errText);
+      }
+
+      const data = await response.json();
+      const rawReply = data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content
+        : '(пустой ответ)';
+
+      const reply = applyRegexToIncoming(rawReply);
+
+      loadingEl.remove();
+      addMessage('ai', reply);
+      history.push({ role: 'assistant', content: rawReply });
+
+    } catch (err) {
+      loadingEl.remove();
+      addMessage('system', 'Ошибка: ' + err.message);
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+</script>
+
+</body>
+</html>
